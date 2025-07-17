@@ -1,75 +1,85 @@
 import requests
 import time
+from datetime import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask
 
 app = Flask(__name__)
 
-# Set your bot token and chat ID here
+# --- Telegram Configuration ---
 BOT_TOKEN = '7219594847:AAErvN0Ehhjxip_f4nztBtJ6z1gUkYPSYng'
-CHAT_ID = 5596809359  # Must be an integer
+CHAT_ID = 5596809359
 
-# Your custom levels
+# --- Levels ---
 BREAKOUT_LEVEL = 25250
 BREAKDOWN_LEVEL = 25100
 
-# NSE Headers (important to avoid blocking)
-HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Accept": "*/*",
-    "Connection": "keep-alive",
-    "Referer": "https://www.nseindia.com"
-}
-
-# Use session to store cookies
-session = requests.Session()
-session.headers.update(HEADERS)
-
+# --- Get NIFTY Live Price ---
 def get_nifty_price():
     try:
-        # Make initial call to nseindia.com to set cookies
-        session.get("https://www.nseindia.com", timeout=5)
-
-        url = "https://www.nseindia.com/api/quote-equity?symbol=NIFTY"
-        response = session.get(url, timeout=10)
-        data = response.json()
-
-        price = float(data['priceInfo']['lastPrice'])
-        return price
-
+        url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "application/json",
+            "Referer": "https://www.nseindia.com/option-chain"
+        }
+        session = requests.Session()
+        session.headers.update(headers)
+        session.get("https://www.nseindia.com", timeout=5)  # Fetch cookies
+        res = session.get(url, timeout=5)
+        data = res.json()
+        return float(data['records']['underlyingValue'])
     except Exception as e:
-        print("Error fetching NIFTY price:", e)
+        print(f"[ERROR] Failed to fetch price: {e}")
         return None
 
+# --- Send Telegram Message ---
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": msg}
     try:
-        res = requests.post(url, data=payload, timeout=5)
-        return res.status_code == 200
+        res = requests.post(url, data=payload)
+        print(f"[✔] Telegram Sent: {msg}")
     except Exception as e:
-        print("Failed to send Telegram message:", e)
-        return False
+        print(f"[ERROR] Telegram failed: {e}")
 
-@app.route('/')
-def run_bot():
-    nifty = get_nifty_price()
-    if not nifty:
-        return "❌ Failed to fetch price"
+# --- Log Alerts to File ---
+def log_alert(message):
+    with open("alerts.log", "a") as file:
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        file.write(f"[{timestamp}] {message}\n")
 
-    message = f"NIFTY price: {nifty} → "
+# --- Check and Act on NIFTY ---
+def check_nifty():
+    price = get_nifty_price()
+    if not price:
+        print("❌ Failed to fetch price")
+        return
 
-    if nifty > BREAKOUT_LEVEL:
-        message += f"📈 Breakout! Suggest CE."
-        send_telegram(f"📈 Breakout Alert!\nNIFTY is at {nifty}\nSuggest CE.")
-    elif nifty < BREAKDOWN_LEVEL:
-        message += f"📉 Breakdown! Suggest PE."
-        send_telegram(f"📉 Breakdown Alert!\nNIFTY is at {nifty}\nSuggest PE.")
+    message = ""
+    if price > BREAKOUT_LEVEL:
+        message = f"📈 Breakout! NIFTY at {price}. Suggest CE."
+    elif price < BREAKDOWN_LEVEL:
+        message = f"📉 Breakdown! NIFTY at {price}. Suggest PE."
     else:
-        message += f"Stable. No breakout."
+        print(f"NIFTY Stable: {price}")
+        return
 
-    return message
+    send_telegram(message)
+    log_alert(message)
 
+# --- Flask endpoint for manual trigger ---
+@app.route('/')
+def manual_check():
+    check_nifty()
+    return "✅ NIFTY checked"
+
+# --- Scheduler runs every 5 mins ---
+scheduler = BackgroundScheduler()
+scheduler.add_job(check_nifty, 'interval', minutes=5)
+scheduler.start()
+
+# --- Main Entry ---
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=10000)
+    print("✅ Bot running on http://localhost:10000 ...")
+    app.run(host='0.0.0.0', port=10000)
