@@ -123,9 +123,10 @@ def home():
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def telegram_webhook():
     data = request.get_json()
+
     if "message" in data:
         message = data["message"]
-        text = message.get("text", "")
+        text = message.get("text", "").strip()
         chat_id = message["chat"]["id"]
 
         if text == "/start":
@@ -133,10 +134,22 @@ def telegram_webhook():
             if suggestion:
                 msg = format_trade_message(suggestion)
             else:
-                msg = f"📊 No breakout/breakdown. NIFTY is stable at {get_current_price()}.\nSupport/Resistance: {calculate_levels()}"
+                price = get_current_price()
+                support, resistance = calculate_levels()
+                msg = f"📊 No breakout/breakdown.\nNIFTY is stable at {price}.\n📉 Support: {support}\n📈 Resistance: {resistance}"
             send_telegram(msg, chat_id)
 
+        elif text == "/price":
+            price = get_current_price()
+            support, resistance = calculate_levels()
+            msg = f"📊 Current NIFTY Price: {price}\n📉 Support: {support}\n📈 Resistance: {resistance}"
+            send_telegram(msg, chat_id)
+
+        else:
+            send_telegram("❓ Unknown command.\nUse /start or /price", chat_id)
+
     return "OK", 200
+
 
 # --- Scheduler Setup ---
 scheduler = BackgroundScheduler()
