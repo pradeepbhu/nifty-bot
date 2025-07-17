@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 # --- Telegram Configuration ---
 BOT_TOKEN = '7219594847:AAErvN0Ehhjxip_f4nztBtJ6z1gUkYPSYng'
-CHAT_ID = 5596809359
+CHAT_ID = 5596809359  # Replace with your chat ID (int)
 
 # --- Levels ---
 BREAKOUT_LEVEL = 25250
@@ -20,13 +20,13 @@ def get_nifty_price():
     try:
         url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "User-Agent": "Mozilla/5.0",
             "Accept": "application/json",
             "Referer": "https://www.nseindia.com/option-chain"
         }
         session = requests.Session()
         session.headers.update(headers)
-        session.get("https://www.nseindia.com", timeout=5)  # Fetch cookies
+        session.get("https://www.nseindia.com", timeout=5)  # Get cookies
         res = session.get(url, timeout=5)
         data = res.json()
         return float(data['records']['underlyingValue'])
@@ -92,7 +92,6 @@ def telegram_webhook():
 
         if text == "/start":
             send_telegram("👋 Welcome! Use /price to get NIFTY value.", chat_id=user_chat_id)
-
         elif text == "/price":
             price = get_nifty_price()
             if price:
@@ -109,18 +108,16 @@ scheduler.add_job(check_nifty, 'interval', minutes=5)
 scheduler.start()
 
 
-# --- Set Webhook when starting ---
+# --- Set Telegram Webhook ---
 def set_webhook():
-    # Use your actual public HTTPS URL from ngrok or deployment
-    public_url = "https://your-ngrok-or-server-url.com"
+    public_url = "https://nifty-bot-0bph.onrender.com"  # <-- Change this if deployed elsewhere
     webhook_url = f"{public_url}/{BOT_TOKEN}"
     res = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook?url={webhook_url}")
-    print("Webhook set:", res.json())
+    print("🔗 Webhook set:", res.json())
 
 
 # --- Main Entry ---
 if __name__ == '__main__':
-    print("✅ Bot running on http://localhost:10000 ...")
-    # Uncomment this line if using ngrok or have a public URL
-    # set_webhook()
+    print("✅ Bot running...")
+    set_webhook()
     app.run(host='0.0.0.0', port=10000)
