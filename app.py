@@ -20,19 +20,34 @@ def get_nifty_price():
     try:
         url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
         headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json",
-            "Referer": "https://www.nseindia.com/option-chain"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "*/*",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Connection": "keep-alive",
+            "Referer": "https://www.nseindia.com/option-chain",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
         }
+
         session = requests.Session()
         session.headers.update(headers)
-        session.get("https://www.nseindia.com", timeout=5)  # Get cookies
+
+        # Set cookies by visiting NSE homepage
+        session.get("https://www.nseindia.com", timeout=5)
+
+        # Now fetch price
         res = session.get(url, timeout=5)
+        res.raise_for_status()
+
         data = res.json()
-        return float(data['records']['underlyingValue'])
+        price = float(data['records']['underlyingValue'])
+        return price
     except Exception as e:
-        print(f"[ERROR] Failed to fetch price: {e}")
+        print(f"[ERROR] NSE Price Fetch Failed: {e}")
         return None
+
 
 
 # --- Send Telegram Message ---
