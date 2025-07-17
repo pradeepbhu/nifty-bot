@@ -2,7 +2,7 @@ import requests
 import time
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
-from flask import Flask
+from flask import Flask, request
 
 app = Flask(__name__)
 
@@ -13,6 +13,7 @@ CHAT_ID = 5596809359
 # --- Levels ---
 BREAKOUT_LEVEL = 25250
 BREAKDOWN_LEVEL = 25100
+
 
 # --- Get NIFTY Live Price ---
 def get_nifty_price():
@@ -33,15 +34,17 @@ def get_nifty_price():
         print(f"[ERROR] Failed to fetch price: {e}")
         return None
 
+
 # --- Send Telegram Message ---
-def send_telegram(msg):
+def send_telegram(msg, chat_id=CHAT_ID):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": msg}
+    payload = {"chat_id": chat_id, "text": msg}
     try:
         res = requests.post(url, data=payload)
         print(f"[✔] Telegram Sent: {msg}")
     except Exception as e:
         print(f"[ERROR] Telegram failed: {e}")
+
 
 # --- Log Alerts to File ---
 def log_alert(message):
@@ -49,7 +52,8 @@ def log_alert(message):
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         file.write(f"[{timestamp}] {message}\n")
 
-# --- Check and Act on NIFTY ---
+
+# --- Check and Alert if Needed ---
 def check_nifty():
     price = get_nifty_price()
     if not price:
@@ -68,18 +72,55 @@ def check_nifty():
     send_telegram(message)
     log_alert(message)
 
+
 # --- Flask endpoint for manual trigger ---
 @app.route('/')
 def manual_check():
     check_nifty()
     return "✅ NIFTY checked"
 
+
+# --- Flask endpoint to handle Telegram webhook ---
+@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+def telegram_webhook():
+    data = request.get_json()
+
+    if "message" in data:
+        msg = data['message']
+        text = msg.get("text", "")
+        user_chat_id = msg['chat']['id']
+
+        if text == "/start":
+            send_telegram("👋 Welcome! Use /price to get NIFTY value.", chat_id=user_chat_id)
+
+        elif text == "/price":
+            price = get_nifty_price()
+            if price:
+                send_telegram(f"💹 NIFTY current price: {price}", chat_id=user_chat_id)
+            else:
+                send_telegram("❌ Could not fetch NIFTY price.", chat_id=user_chat_id)
+
+    return "OK", 200
+
+
 # --- Scheduler runs every 5 mins ---
 scheduler = BackgroundScheduler()
 scheduler.add_job(check_nifty, 'interval', minutes=5)
 scheduler.start()
 
+
+# --- Set Webhook when starting ---
+def set_webhook():
+    # Use your actual public HTTPS URL from ngrok or deployment
+    public_url = "https://your-ngrok-or-server-url.com"
+    webhook_url = f"{public_url}/{BOT_TOKEN}"
+    res = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook?url={webhook_url}")
+    print("Webhook set:", res.json())
+
+
 # --- Main Entry ---
 if __name__ == '__main__':
     print("✅ Bot running on http://localhost:10000 ...")
+    # Uncomment this line if using ngrok or have a public URL
+    # set_webhook()
     app.run(host='0.0.0.0', port=10000)
