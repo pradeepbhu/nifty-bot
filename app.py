@@ -18,35 +18,26 @@ BREAKDOWN_LEVEL = 25100
 # --- Get NIFTY Live Price ---
 def get_nifty_price():
     try:
-        url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Accept": "*/*",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Connection": "keep-alive",
-            "Referer": "https://www.nseindia.com/option-chain",
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-origin",
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI"
+        params = {
+            "region": "IN",
+            "lang": "en-IN",
+            "includePrePost": "false",
+            "interval": "2m",
+            "range": "1d"
         }
-
-        session = requests.Session()
-        session.headers.update(headers)
-
-        # Set cookies by visiting NSE homepage
-        session.get("https://www.nseindia.com", timeout=5)
-
-        # Now fetch price
-        res = session.get(url, timeout=5)
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+        res = requests.get(url, headers=headers, params=params, timeout=5)
         res.raise_for_status()
-
         data = res.json()
-        price = float(data['records']['underlyingValue'])
-        return price
+        last_close = data['chart']['result'][0]['meta']['regularMarketPrice']
+        return float(last_close)
     except Exception as e:
-        print(f"[ERROR] NSE Price Fetch Failed: {e}")
+        print(f"[ERROR] Yahoo Price Fetch Failed: {e}")
         return None
+
 
 
 
