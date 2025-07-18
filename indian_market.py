@@ -1,9 +1,9 @@
 from flask import Flask, request
 from apscheduler.schedulers.background import BackgroundScheduler
 import requests
-from datetime import datetime, timedelta
-import time
-import json
+from datetime import datetime
+import os
+import random
 
 app = Flask(__name__)
 
@@ -12,7 +12,6 @@ BOT_TOKEN = '7219594847:AAErvN0Ehhjxip_f4nztBtJ6z1gUkYPSYng'  # Replace with you
 CHAT_ID = 5596809359  # Replace with your chat ID
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-# Premium thresholds for CE/PE
 PREMIUM_CE = 80
 PREMIUM_PE = 80
 
@@ -36,26 +35,19 @@ market_data = {
 
 # === UTILITY FUNCTIONS ===
 def fetch_nse_data(symbol):
-    """Fetch live data from NSE website"""
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive"
+        "User-Agent": "Mozilla/5.0",
+        "Accept-Language": "en-US,en;q=0.9"
     }
-    
     try:
-        # First get the cookies
         session = requests.Session()
         session.get("https://www.nseindia.com", headers=headers)
-        
-        # Then make the API request
-        url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}"
         if symbol == "NIFTY":
             url = "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%2050"
         elif symbol == "BANKNIFTY":
             url = "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20BANK"
-            
+        else:
+            return None
         response = session.get(url, headers=headers)
         response.raise_for_status()
         return response.json()
@@ -64,14 +56,11 @@ def fetch_nse_data(symbol):
         return None
 
 def parse_nifty_data(data):
-    """Parse NIFTY/BANKNIFTY data from NSE response"""
     if 'data' not in data:
         return None
-        
     index_data = next((item for item in data['data'] if item['index'] in ['NIFTY 50', 'NIFTY BANK']), None)
     if not index_data:
         return None
-        
     return {
         'open': index_data['open'],
         'high': index_data['dayHigh'],
@@ -81,14 +70,12 @@ def parse_nifty_data(data):
     }
 
 def generate_simulated_candle(last_close, symbol):
-    """Generate simulated OHLC data if live fetch fails"""
     now = datetime.now()
     base_price = 25200 if symbol == 'NIFTY' else 52000
-    open_price = last_close if last_close else base_price
+    open_price = last_close or base_price
     high = open_price + random.randint(10, 50)
     low = open_price - random.randint(10, 50)
-    close = random.randint(low, high)
-    
+    close = random.randint(int(low), int(high))
     return {
         "time": now.strftime('%Y-%m-%d %H:%M'),
         "open": open_price,
@@ -98,7 +85,6 @@ def generate_simulated_candle(last_close, symbol):
     }
 
 def calculate_support_resistance(ohlc_data, n=6):
-    """Calculate support and resistance levels"""
     if len(ohlc_data) < n:
         n = len(ohlc_data)
     recent = ohlc_data[-n:]
@@ -108,18 +94,18 @@ def calculate_support_resistance(ohlc_data, n=6):
 
 # === TRADING LOGIC ===
 def get_trade_suggestion(symbol):
-    """Generate trading suggestion based on technicals"""
     data = market_data[symbol]
     price = data['current_price']
     resistance = data['resistance']
     support = data['support']
-    
+    if not all([price, resistance, support]):
+        return None
     if price > resistance:
         return {
             "symbol": symbol,
             "type": "Breakout",
             "side": "CE",
-            "strike": round(resistance/100)*100,  # Nearest strike
+            "strike": round(resistance/100)*100,
             "entry_condition": f"Buy if premium < ₹{PREMIUM_CE}",
             "target": "₹130",
             "stoploss": "₹60",
@@ -133,7 +119,7 @@ def get_trade_suggestion(symbol):
             "symbol": symbol,
             "type": "Breakdown",
             "side": "PE",
-            "strike": round(support/100)*100,  # Nearest strike
+            "strike": round(support/100)*100,
             "entry_condition": f"Buy if premium < ₹{PREMIUM_PE}",
             "target": "₹130",
             "stoploss": "₹60",
@@ -146,7 +132,6 @@ def get_trade_suggestion(symbol):
 
 # === TELEGRAM FUNCTIONS ===
 def send_telegram(text, chat_id=CHAT_ID):
-    """Send message to Telegram"""
     url = f"{BASE_URL}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     try:
@@ -155,7 +140,6 @@ def send_telegram(text, chat_id=CHAT_ID):
         print("Telegram Error:", e)
 
 def format_trade_message(data):
-    """Format trade suggestion for Telegram"""
     return f"""
 📈 <b>{data['symbol']} {data['type']} ALERT!</b>
 ──────────────────
@@ -172,7 +156,6 @@ def format_trade_message(data):
 """
 
 def format_status_message(symbol):
-    """Format status message for Telegram"""
     data = market_data[symbol]
     return f"""
 📊 <b>{symbol} Status</b>
@@ -186,10 +169,8 @@ def format_status_message(symbol):
 
 # === SCHEDULED TASKS ===
 def update_market_data():
-    """Update market data for both indices"""
     for symbol in ['NIFTY', 'BANKNIFTY']:
         try:
-            # Try to fetch live data first
             raw_data = fetch_nse_data(symbol)
             if raw_data:
                 candle = parse_nifty_data(raw_data)
@@ -197,33 +178,23 @@ def update_market_data():
                     market_data[symbol]['ohlc'].append(candle)
                     market_data[symbol]['current_price'] = candle['close']
                     market_data[symbol]['last_fetch'] = datetime.now()
-                    
-                    # Calculate support/resistance
                     resistance, support = calculate_support_resistance(market_data[symbol]['ohlc'])
                     market_data[symbol]['resistance'] = resistance
                     market_data[symbol]['support'] = support
-                    
-                    # Keep only last 96 candles (24 hours of 15-min data)
                     if len(market_data[symbol]['ohlc']) > 96:
                         market_data[symbol]['ohlc'] = market_data[symbol]['ohlc'][-96:]
                     continue
-            
-            # Fallback to simulated data if live fetch fails
             last_close = market_data[symbol]['ohlc'][-1]['close'] if market_data[symbol]['ohlc'] else None
             candle = generate_simulated_candle(last_close, symbol)
             market_data[symbol]['ohlc'].append(candle)
             market_data[symbol]['current_price'] = candle['close']
-            
-            # Calculate support/resistance
             resistance, support = calculate_support_resistance(market_data[symbol]['ohlc'])
             market_data[symbol]['resistance'] = resistance
             market_data[symbol]['support'] = support
-            
         except Exception as e:
             print(f"Error updating {symbol} data:", e)
 
 def check_for_alerts():
-    """Check for trading opportunities and send alerts"""
     for symbol in ['NIFTY', 'BANKNIFTY']:
         suggestion = get_trade_suggestion(symbol)
         if suggestion:
@@ -231,7 +202,7 @@ def check_for_alerts():
             send_telegram(msg)
             print(f"[ALERT SENT] {symbol}: {suggestion['type']} at {suggestion['price']:.2f}")
         else:
-            print(f"[NO TRADE] {symbol} at {market_data[symbol]['current_price']:.2f}")
+            print(f"[NO TRADE] {symbol} at {market_data[symbol]['current_price']}")
 
 # === FLASK ROUTES ===
 @app.route('/')
@@ -245,7 +216,6 @@ def telegram_webhook():
         message = data["message"]
         text = message.get("text", "").strip().upper()
         chat_id = message["chat"]["id"]
-        
         if text == "/START":
             responses = []
             for symbol in ['NIFTY', 'BANKNIFTY']:
@@ -255,49 +225,37 @@ def telegram_webhook():
                 else:
                     responses.append(format_status_message(symbol))
             send_telegram("\n\n".join(responses), chat_id)
-            
         elif text == "/NIFTY":
             suggestion = get_trade_suggestion('NIFTY')
             msg = format_trade_message(suggestion) if suggestion else format_status_message('NIFTY')
             send_telegram(msg, chat_id)
-            
         elif text == "/BANKNIFTY":
             suggestion = get_trade_suggestion('BANKNIFTY')
             msg = format_trade_message(suggestion) if suggestion else format_status_message('BANKNIFTY')
             send_telegram(msg, chat_id)
-            
         elif text == "/PRICE":
             responses = [format_status_message(symbol) for symbol in ['NIFTY', 'BANKNIFTY']]
             send_telegram("\n\n".join(responses), chat_id)
-            
         else:
             help_text = """
 📊 <b>Available Commands</b>:
-──────────────────
-/start - Get current market status
-/nifty - NIFTY 50 analysis
+/start - Get market status
+/nifty - NIFTY analysis
 /banknifty - BANKNIFTY analysis
-/price - Current prices for both indices
-──────────────────
-ℹ️ Bot checks for breakouts every 5 minutes
+/price - Current prices
+ℹ️ Bot checks breakout/breakdown every 5 minutes.
 """
             send_telegram(help_text, chat_id)
-    
     return "OK", 200
 
 # === INITIALIZATION ===
 if __name__ == "__main__":
-    # Initialize with some data
-    print("Initializing market data...")
-    for _ in range(10):
-        update_market_data()
-        time.sleep(1)
-    
-    # Set up scheduler
+    update_market_data()
     scheduler = BackgroundScheduler()
     scheduler.add_job(update_market_data, 'interval', minutes=5)
     scheduler.add_job(check_for_alerts, 'interval', minutes=5)
     scheduler.start()
-    
-    print("✅ Bot running on http://localhost:5000")
-    app.run(host="0.0.0.0", port=5000)
+
+    PORT = int(os.environ.get("PORT", 5000))  # Default to port 5000
+    print(f"✅ Bot running on http://localhost:{PORT}")
+    app.run(host="0.0.0.0", port=PORT)
